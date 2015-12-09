@@ -39,8 +39,6 @@
 
 :tocdepth: 1
 
-Description of Alert Production Simulator v1.0
-==============================================
 This document describes the current state of the Alert Production Simulator, which was written to test the workflow described in LDM-230, revision 1.2 dated Oct 10, 2013.   
 
 The system consists of twenty-five virtual machines simulating over two hundred machines, simulating the workflow required for one thread of processing.   Please note that image archiving, science image processing, catch-up archiver, and EFD replicator are not implemented in this simulator.
