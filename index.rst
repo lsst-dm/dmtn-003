@@ -52,13 +52,13 @@ The AP simulator runs on VMware virtual machines in the following configuration:
 - lsst-base - main Base DMCS system
 - lsst-base2 - failover Base DMCS system
  
-- lsst-rep - replicator HTCondor master node
+- lsst-rep - replicator HTCondor central manager
 - lsst-rep1 - HTCondor replicator job execution node, running 11 slots
 - lsst-rep2 - HTCondor replicator job execution node, running 11 slots
  
 - lsst-dist - distributor node, running 22 distributor node processes
  
-- lsst-work - worker HTCondor master node
+- lsst-work - worker HTCondor central manager
 - lsst-run1 through lsst-run14 (14 virtual machines) - each configured with 13 slots
 - lsst-run15 - configured with 7 slots.
  
@@ -96,7 +96,7 @@ After setup, execute the following commands on the following machines:
 - lsst-dist - launchDistributors.sh - starts the distributor node processes on lsst-dist (22 processes)
 - lsst-ocs - ocsFileNode.py - starts a server the delivers files to replicator jobs that request them.
 
-There are two HTCondor pools.  The Replicator pool is set up with lsst-rep as the master node, and lsst-rep1 and lsst-rep2 containing  11 HTCondor slots each.   The Worker pool is setup with lsst-work as the master node, and lsst-run1 through lsst-run15 running 189 HTCondor slots in total.
+There are two HTCondor pools.  The Replicator pool is set up with lsst-rep as the central manager, and lsst-rep1 and lsst-rep2 containing  11 HTCondor slots each.   The Worker pool is setup with lsst-work as the central manager, and lsst-run1 through lsst-run15 running 189 HTCondor slots in total.
 
 Workflow
 --------
@@ -118,12 +118,12 @@ This entire process is described  in greater detail below:
  
 #. A “nextVisit” event is sent from the OCS system, lsst-ocs.
 #. The message is received by the Base DMCS system, lsst-base.
-#. The Base DMCS system submits 189 worker jobs (with the information about CCD image they’re looking for) to the worker master node, lsst-work, which controls the worker pool.
+#. The Base DMCS system submits 189 worker jobs (with the information about CCD image they’re looking for) to the worker central manager, lsst-work, which controls the worker pool.
 #. The worker jobs begin to execute on slots available on the HTCondor worker cluster.
 #. The worker jobs subscribe to the OCS “startReadout” event.
 #. The worker jobs contact the Archive DMCS to ask which distributor has the image they’re looking for.
 #. A “startIntegration” event is sent from the OCS system.
-#. The Base DMCS system submits 21 replicator jobs (containing the visit id, exposure sequence number of the RAFT they’re looking for) to the replicator master node, lsst-rep, which controls the replicator pool.
+#. The Base DMCS system submits 21 replicator jobs (containing the visit id, exposure sequence number of the RAFT they’re looking for) to the replicator central manager, lsst-rep, which controls the replicator pool.
 #. The replicator jobs begin to execute on the HTCondor replicator cluster.
 #. The replicator jobs send the visit id, exposure sequence number and the raft to the replicator node process, which passed it to the paired distributor.
 #. The distributor sends a messages to the Archive DMCS telling it which CCDs it will be handling for this RAFT.
@@ -167,25 +167,25 @@ The Base DMCS receives messages from the OCS and controls the job submission to 
 Two Base DMCS processes are started, one on primary system and one on a secondary system.  These can be started in any order.  On start up, the processes contact each other to negotiate the role each has, either “main” or ‘failover”.  Both processes subscribe and receive messages from the simulated OCS, but only the the process currently designated as “main” acts on the messages.  A heartbeat thread is maintained by both processes.  If the failover process detects that the main process is no longer alive, it’s role switches to main.  When the process that had been designated as main returns, it’s role is now reassigned to “failover”.   The following describes the actions of the Base DMCS in the “main” role.
 
 OCS messages are implemented as DM software events, since the OCS DDS library was not available when the simulator was written.  The Base DMCS process subscribes to one topic, and receives all events on that topic.   It responds only to the “startIntegration” and “nextVisit” events, and submits jobs to the appropriate HTCondor pool.   These jobs are submitted via the Python API that HTCondor software provides.
-On receipt of the “nextVisit” event, the Base DMCS submits 189 Worker jobs and 4 Wavefront jobs to the Worker master node.   Each job is given the visit id, number of exposures to be taken, boresight pointing, filter id, and CCD id.  The jobs are place holders for the real scientific code, and are described here.
+On receipt of the “nextVisit” event, the Base DMCS submits 189 Worker jobs and 4 Wavefront jobs to the Worker central manager.   Each job is given the visit id, number of exposures to be taken, boresight pointing, filter id, and CCD id.  The jobs are place holders for the real scientific code, and are described here.
 On receipt of the “startIntegration” event, the Base DMCS submits 22 replicator jobs, one for each raft, and a single job for the wavefront sensors.  The replicator jobs are described here.
 
-**Notes**: Both the replicator jobs and worker jobs are submitted to their respective master nodes, and have no mechanism for monitoring their progress.  In data challenges, work was submitted via HTCondor’s DAGman, which provided a mechanism for resubmitting jobs that failed automatically for a configured number of times.  Furthermore, it provided a resubmission DAG for jobs that completed failed after that set number of times.   HTCondor itself does not resubmit failed jobs automatically;  it will, however resubmit a job if a HTCondor job slot in which it was running has an error of some kind.
+**Notes**: Both the replicator jobs and worker jobs are submitted to their respective central managers, and have no mechanism for monitoring their progress.  In data challenges, work was submitted via HTCondor’s DAGman, which provided a mechanism for resubmitting jobs that failed automatically for a configured number of times.  Furthermore, it provided a resubmission DAG for jobs that completed failed after that set number of times.   HTCondor itself does not resubmit failed jobs automatically;  it will, however resubmit a job if a HTCondor job slot in which it was running has an error of some kind.
 None of this is desired behavior.   We need to monitor job progress, success and failure. Resubmitting a job on failure of software or hardware to run given the time constraints is not feasible.  Using DAGman to submit files would require us to keep track of the resubmit files, which seems like overkill.   We need a mechanism that logs success and the reason for failure so that we can take appropriate action.
 
-Replicator Master Node
-^^^^^^^^^^^^^^^^^^^^^^
+Replicator Central Manager
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The HTCondor master node for the Replicator pool is configured on lsst-rep.   This system acts as the HTCondor master for two VMs, lsst-rep1 and lsst-rep2, which are configured with 2 CPUs and 4 gig of memory each.   HTCondor is configured on lsst-rep1 and lsst-rep2 to have 11 job slots.
+The HTCondor Central Manager for the Replicator pool is configured on lsst-rep.   This system acts as the HTCondor central manager for two VMs, lsst-rep1 and lsst-rep2, which are configured with 2 CPUs and 4 gig of memory each.   HTCondor is configured on lsst-rep1 and lsst-rep2 to have 11 job slots.
  
-This master node accepts job submissions from lsst-base, and runs those jobs on lsst-rep1 and lsst-rep2.
+This central manager node accepts job submissions from lsst-base, and runs those jobs on lsst-rep1 and lsst-rep2.
 
 Replicator Execution Node
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A replicator node is part of the HTCondor pool, which is controlled by the HTCondor master.    Each node accepts replicator Jobs scheduled by the HTCondor master.   There are 22 worker nodes, one for each raft (including wavefront).
+A replicator node is part of the HTCondor pool, which is controlled by the central manager.    Each node accepts replicator Jobs scheduled by the central manager.   There are 22 worker nodes, one for each raft (including wavefront).
 
-**Notes**:  Due to limitations capacity at the time the simulator was written, this was simulated across 2 VMs.   Each VM was configured with 2 CPUs, and 4 gig of memory.   HTCondor will ordinarily make the number of slots for jobs equal to the number of CPUs, but we overrode this to configure 11 slots per for each VM.    We noted varying startup times from the time the job was submitted to the HTCondor master.  The pool was configured to retain ownership of the slot, which increased the speed at which jobs were matched to slots. In general, the start up was very quick, but there were times when we noted start up times of between 15 and 30 seconds.   It was difficult to determine why exactly this occurred, but given the limited capacity of the VMs themselves, we believe this is a contributing factor.
+**Notes**:  Due to limitations capacity at the time the simulator was written, this was simulated across 2 VMs.   Each VM was configured with 2 CPUs, and 4 gig of memory.   HTCondor will ordinarily make the number of slots for jobs equal to the number of CPUs, but we overrode this to configure 11 slots per for each VM.    We noted varying startup times from the time the job was submitted to the central manager.  The pool was configured to retain ownership of the slot, which increased the speed at which jobs were matched to slots. In general, the start up was very quick, but there were times when we noted start up times of between 15 and 30 seconds.   It was difficult to determine why exactly this occurred, but given the limited capacity of the VMs themselves, we believe this is a contributing factor.
 
 Replicator Node Process
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -251,16 +251,16 @@ Since this portion of the simulator was written, we’ve found that there are so
 Worker Master Node
 ^^^^^^^^^^^^^^^^^^
 
-The HTCondor master node for the Worker pool is configured on lsst-work.   This system acts as the HTCondor master for fifteen VMs, lsst-run1 through lsst-run15, which are configured with 2 CPUs and 4 gig of memory each.   HTCondor is configured on lsst-run1 through lsst-run14 to have 13 job slots each, and lsst-run15 is configured with 7 slots.
+The HTCondor central manager for the Worker pool is configured on lsst-work.   This system acts as the central manager for fifteen VMs, lsst-run1 through lsst-run15, which are configured with 2 CPUs and 4 gig of memory each.   HTCondor is configured on lsst-run1 through lsst-run14 to have 13 job slots each, and lsst-run15 is configured with 7 slots.
  
-This master node accepts job submissions from lsst-base, and runs those jobs on lsst-run1 through lsst-run15.
+This central manager accepts job submissions from lsst-base, and runs those jobs on lsst-run1 through lsst-run15.
 
 Worker Execution Node
 ^^^^^^^^^^^^^^^^^^^^^
 
-A worker node is part of the HTCondor pool, which is controlled by the HTCondor master.    Each node accepts Worker Jobs scheduled by the HTCondor master.   There are 189 worker nodes, one for each CCD.
+A worker node is part of the HTCondor pool, which is controlled by the central manager.    Each node accepts Worker Jobs scheduled by the central manager.   There are 189 worker nodes, one for each CCD.
 
-**Notes**:  Due to limitations capacity at the time the simulator was written, this was all simulated across 15 VMs.   Each VM was configured with 2 CPUs, and 4 gig of memory.   HTCondor will ordinarily make the number of slots for jobs equal to the number of CPUs, but we overrode this to configure 13 slots per for the first 14 VMs, and 7 for the last one.    As with the replicator jobs, we noted varying startup times from the time the job was submitted to the HTCondor master.  The pool was configured to retain ownership of the slot, which increased the speed at which jobs were matched to slots. In general, the start up was very quick, but there were times when we noted start up times of between 15 and 30 seconds.   It was difficult to determine why exactly this occurred, but given the limited capacity of the VMs themselves, we believe this is a contributing factor.
+**Notes**:  Due to limitations capacity at the time the simulator was written, this was all simulated across 15 VMs.   Each VM was configured with 2 CPUs, and 4 gig of memory.   HTCondor will ordinarily make the number of slots for jobs equal to the number of CPUs, but we overrode this to configure 13 slots per for the first 14 VMs, and 7 for the last one.    As with the replicator jobs, we noted varying startup times from the time the job was submitted to the central manager.  The pool was configured to retain ownership of the slot, which increased the speed at which jobs were matched to slots. In general, the start up was very quick, but there were times when we noted start up times of between 15 and 30 seconds.   It was difficult to determine why exactly this occurred, but given the limited capacity of the VMs themselves, we believe this is a contributing factor.
 
 Worker Job
 ^^^^^^^^^^
